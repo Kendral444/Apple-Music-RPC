@@ -22,7 +22,7 @@ Built from the ground up to replace outdated polling scripts, this v2.0 release 
 
 ---
 
-## ⚡ For Users: Installation Guide
+## For Users: Installation Guide
 
 If you just want to use the application without dealing with code, installation is extremely simple.
 
@@ -37,7 +37,7 @@ If you just want to use the application without dealing with code, installation 
 
 ---
 
-## 💻 For Developers: Development Workflow
+## For Developers: Development Workflow
 
 Prerequisites for compiling from source:
 *   Node.js (v20+)

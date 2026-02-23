@@ -68,7 +68,7 @@ async function updateDiscordActivity(payload: MediaPayload) {
 function startNativeExtractor() {
     const isPkg = typeof (process as any).pkg !== 'undefined';
     const exePath = isPkg
-        ? path.join(path.dirname(process.execPath), 'MediaExtractor.exe')
+        ? path.join(path.dirname(process.execPath), 'MediaExtractor', 'MediaExtractor.exe')
         : path.join(__dirname, '../src/MediaExtractor/MediaExtractor.exe');
     logger.info(`[Extractor] Démarrage du binaire C# (${exePath})`);
 

@@ -11,6 +11,7 @@ namespace MediaExtractor
     {
         private static string lastTitle = "";
         private static string lastStatus = "";
+        private static long lastMaxMs = -1;
 
         static async Task Main(string[] args)
         {
@@ -58,7 +59,7 @@ namespace MediaExtractor
                             long endTs = now + (maxMs - posMs);
 
                             // Déduplication stricte
-                            if (title != lastTitle || status != lastStatus)
+                            if (title != lastTitle || status != lastStatus || Math.Abs(maxMs - lastMaxMs) > 1000)
                             {
                                 string json = $@"{{""source"":""{EscapeJson(source)}"",""title"":""{EscapeJson(title)}"",""artist"":""{EscapeJson(artist)}"",""album"":""{EscapeJson(album)}"",""status"":""{status}"",""startTime"":{startTs},""endTime"":{endTs}}}";
                                 
@@ -66,6 +67,7 @@ namespace MediaExtractor
                                 
                                 lastTitle = title;
                                 lastStatus = status;
+                                lastMaxMs = maxMs;
                             }
                         }
                     }
@@ -76,6 +78,7 @@ namespace MediaExtractor
                             Console.WriteLine(@"{""status"":""Stopped""}");
                             lastStatus = "Stopped";
                             lastTitle = "";
+                            lastMaxMs = -1;
                         }
                     }
 

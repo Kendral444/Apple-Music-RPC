@@ -102,7 +102,7 @@ namespace AppleMusicRPC_Updater
                 if (response.IsSuccessStatusCode)
                 {
                     string json = await response.Content.ReadAsStringAsync();
-                    var release = JsonSerializer.Deserialize<GitHubRelease>(json);
+                    var release = JsonSerializer.Deserialize(json, AppJsonSerializerContext.Default.GitHubRelease);
                     
                     if (release != null && release.Assets != null && release.Assets.Length > 0)
                     {
@@ -159,6 +159,7 @@ namespace AppleMusicRPC_Updater
                         }
                         else
                         {
+                            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
                             entry.ExtractToFile(destinationPath, true); // true = overwrite
                         }
                     }
@@ -201,6 +202,7 @@ namespace AppleMusicRPC_Updater
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
                     FileName = exePath,
+                    WorkingDirectory = InstallDirectory,
                     UseShellExecute = true,
                     WindowStyle = ProcessWindowStyle.Hidden // Furtivité
                 };
@@ -230,5 +232,11 @@ namespace AppleMusicRPC_Updater
 
         [System.Text.Json.Serialization.JsonPropertyName("browser_download_url")]
         public string BrowserDownloadUrl { get; set; }
+    }
+
+    [System.Text.Json.Serialization.JsonSerializable(typeof(GitHubRelease))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(GitHubAsset))]
+    public partial class AppJsonSerializerContext : System.Text.Json.Serialization.JsonSerializerContext
+    {
     }
 }

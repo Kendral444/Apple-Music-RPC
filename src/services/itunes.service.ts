@@ -71,25 +71,43 @@ export async function resolveTrackInfo(artist: string, album: string, title: str
 
     try {
         const query = encodeURIComponent(`${mainArtist} ${cleanTitle}`);
-        const url = `/search?term=${query}&media=music&entity=song&limit=1&country=FR`;
+        const url = `/search?term=${query}&media=music&entity=song&limit=5&country=FR`;
 
         const data = await breaker.fire(url) as z.infer<typeof ItunesResponseSchema>;
 
         if (data.resultCount > 0 && data.results && data.results.length > 0) {
-            const match = data.results[0];
-            let artUrl = match.artworkUrl100 || null;
-            if (artUrl) artUrl = artUrl.replace('100x100bb', '1024x1024bb');
+            // Validation stricte du faux-positif iTunes
+            const match = data.results.find(r => {
+                const apiArtist = (r.artistName || '').toLowerCase();
+                const apiTrack = (r.trackName || '').toLowerCase();
+                const qArtist = mainArtist.toLowerCase();
+                const qTrack = cleanTitle.toLowerCase();
 
-            const info: TrackContext = { art: artUrl, url: match.trackViewUrl || 'https://music.apple.com/' };
+                // Similarité acceptée si l'un contient l'autre formellement
+                const artistMatch = apiArtist.includes(qArtist) || qArtist.includes(apiArtist);
+                // Afin d'éviter les faux positifs sur des mots communs comme "Souvenirs"
+                const trackMatch = apiTrack.includes(qTrack) || qTrack.includes(apiTrack);
 
-            // Prevent Memory Leak: LRU Cache logic simplified (max 500 records)
-            if (trackCache.size > 500) {
-                const firstKey = trackCache.keys().next().value;
-                if (firstKey) trackCache.delete(firstKey);
+                return artistMatch && trackMatch;
+            });
+
+            if (match) {
+                let artUrl = match.artworkUrl100 || null;
+                if (artUrl) artUrl = artUrl.replace('100x100bb', '1024x1024bb');
+
+                const info: TrackContext = { art: artUrl, url: match.trackViewUrl || 'https://music.apple.com/' };
+
+                // Prevent Memory Leak: LRU Cache logic simplified (max 500 records)
+                if (trackCache.size > 500) {
+                    const firstKey = trackCache.keys().next().value;
+                    if (firstKey) trackCache.delete(firstKey);
+                }
+
+                trackCache.set(cacheKey, info);
+                return info;
+            } else {
+                logger.warn(`[API iTunes] Faux positif détecté pour ${cacheKey} (Les noms diffèrent)`);
             }
-
-            trackCache.set(cacheKey, info);
-            return info;
         }
     } catch (error: any) {
         logger.error(`[API iTunes] Echec de résolution pour ${cacheKey} : ${error.message || 'Erreur inconnue'}`);

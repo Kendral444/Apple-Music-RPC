@@ -30,12 +30,26 @@ namespace MediaExtractor
 
                 while (true)
                 {
-                    var session = sessionManager.GetCurrentSession();
-                    if (session != null)
+                    var sessions = sessionManager.GetSessions();
+                    GlobalSystemMediaTransportControlsSession targetSession = null;
+
+                    // Filtrage strict : Whitelist pour chercher Apple Music / iTunes parmi toutes les applications en cours
+                    foreach (var s in sessions)
                     {
-                        var mediaProps = await session.TryGetMediaPropertiesAsync();
-                        var playbackInfo = session.GetPlaybackInfo();
-                        var timeline = session.GetTimelineProperties();
+                        if (!string.IsNullOrEmpty(s.SourceAppUserModelId) && 
+                            (s.SourceAppUserModelId.IndexOf("AppleMusic", StringComparison.OrdinalIgnoreCase) >= 0 || 
+                             s.SourceAppUserModelId.IndexOf("iTunes", StringComparison.OrdinalIgnoreCase) >= 0))
+                        {
+                            targetSession = s;
+                            break;
+                        }
+                    }
+
+                    if (targetSession != null)
+                    {
+                        var mediaProps = await targetSession.TryGetMediaPropertiesAsync();
+                        var playbackInfo = targetSession.GetPlaybackInfo();
+                        var timeline = targetSession.GetTimelineProperties();
 
                         if (mediaProps != null && playbackInfo != null)
                         {
@@ -43,7 +57,7 @@ namespace MediaExtractor
                             string artist = mediaProps.Artist ?? "";
                             string album = mediaProps.AlbumTitle ?? "";
                             string status = playbackInfo.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing ? "Playing" : "Paused";
-                            string source = session.SourceAppUserModelId ?? "";
+                            string source = targetSession.SourceAppUserModelId ?? "";
 
                             long posMs = 0;
                             long maxMs = 0;

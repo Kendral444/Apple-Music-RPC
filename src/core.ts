@@ -8,7 +8,7 @@ import { resolveTrackInfo } from './services/itunes.service';
 import notifier from 'node-notifier';
 
 const CLIENT_ID = '1114806909590048798';
-const rpcClient = new Client({ transport: 'ipc' });
+let rpcClient: Client | null = null;
 
 let extractorProcess: import('child_process').ChildProcess | null = null;
 let isRpcReady = false;
@@ -22,7 +22,7 @@ async function updateDiscordActivity(payload: MediaPayload) {
 
     if (payload.status === 'Stopped' || payload.status === 'Paused' || payload.status === 'Error') {
         logger.debug('[Discord RPC] Nettoyage de l\'activité (Arrêt/Pause/Erreur)');
-        rpcClient.clearActivity().catch(err => logger.error({ err }, '[RPC] Echec clearActivity'));
+        if (rpcClient) rpcClient.clearActivity().catch(err => logger.error({ err }, '[RPC] Echec clearActivity'));
         return;
     }
 
@@ -60,10 +60,12 @@ async function updateDiscordActivity(payload: MediaPayload) {
         };
     }
 
-    (rpcClient as any).request('SET_ACTIVITY', {
-        pid: process.pid,
-        activity: activity
-    }).catch((err: any) => logger.error({ err }, '[RPC] Erreur SET_ACTIVITY'));
+    if (rpcClient) {
+        (rpcClient as any).request('SET_ACTIVITY', {
+            pid: process.pid,
+            activity: activity
+        }).catch((err: any) => logger.error({ err }, '[RPC] Erreur SET_ACTIVITY'));
+    }
 }
 
 function startNativeExtractor() {
@@ -119,33 +121,42 @@ function startNativeExtractor() {
 }
 
 function initialize() {
-    logger.info('[System] Initialisation Core v2.6 (Résilience & Toasts)');
+    logger.info('[System] Initialisation Core v2.6.1 (Résilience Intégrale IPC)');
 
     // Démarrage immédiat de l'extracteur natif sans attendre Discord
     startNativeExtractor();
 
-    rpcClient.on('ready', () => {
-        logger.info(`[RPC] Connecté à Discord avec le client ${rpcClient.user?.username}`);
-        isRpcReady = true;
-
-        notifier.notify({
-            title: 'Apple Music RPC',
-            message: 'Connecté avec succès à Discord',
-            sound: false,
-            wait: false
-        });
-    });
-
-    rpcClient.on('disconnected', () => {
-        logger.warn('[RPC] Déconnecté de Discord. Tentative de reconnexion dans 10s...');
-        isRpcReady = false;
-        setTimeout(connectToDiscord, 10000);
-    });
-
     const connectToDiscord = () => {
         if (isRpcReady) return;
+
+        // Si un socket corrompu existe déjà en mémoire, on le détruit brutalement
+        if (rpcClient) {
+            try { rpcClient.destroy().catch(() => { }); } catch (e) { }
+        }
+
+        // On forge systématiquement une toute nouvelle connexion Socket IPC à Discord
+        rpcClient = new Client({ transport: 'ipc' });
+
+        rpcClient.on('ready', () => {
+            logger.info(`[RPC] Connecté à Discord avec le client ${rpcClient?.user?.username}`);
+            isRpcReady = true;
+
+            notifier.notify({
+                title: 'Apple Music RPC',
+                message: 'Connecté avec succès à Discord',
+                sound: false,
+                wait: false
+            });
+        });
+
+        rpcClient.on('disconnected', () => {
+            logger.warn('[RPC] Déconnecté de Discord. Tentative de reconnexion dans 10s...');
+            isRpcReady = false;
+            setTimeout(connectToDiscord, 10000);
+        });
+
         rpcClient.login({ clientId: CLIENT_ID }).catch((err: any) => {
-            logger.debug(`[RPC] En attente de Discord (Fermé ou injoignable). Résilience activée...`);
+            logger.debug(`[RPC] En attente de Discord (Fermé ou injoignable). Création d'un nouveau socket dans 10s...`);
             setTimeout(connectToDiscord, 10000);
         });
     };

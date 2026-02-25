@@ -156,7 +156,10 @@ function initialize() {
                 title: 'Apple Music RPC',
                 message: 'Connecté avec succès à Discord',
                 sound: false,
-                wait: false
+                wait: false,
+                icon: isPkg
+                    ? path.join(path.dirname(process.execPath), 'logoserenicord.png')
+                    : path.join(__dirname, '../logoserenicord.png')
             });
         });
 

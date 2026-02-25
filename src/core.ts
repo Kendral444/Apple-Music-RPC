@@ -13,6 +13,17 @@ let rpcClient: Client | null = null;
 let extractorProcess: import('child_process').ChildProcess | null = null;
 let isRpcReady = false;
 
+// Correction "pkg" : Instanciation formelle du composant C++ natif de Toast Notification
+const isPkg = typeof (process as any).pkg !== 'undefined';
+const snoreToastPath = isPkg
+    ? path.join(path.dirname(process.execPath), 'notifier', 'snoreToast', 'snoretoast-x64.exe')
+    : undefined;
+
+const customNotifier = new (notifier.WindowsToaster as any)({
+    withFallback: true,
+    customPath: snoreToastPath
+});
+
 function sanitizeString(str: string): string {
     return (str || '').replace(/[\x00-\x1F\x7F]/g, '').trim();
 }
@@ -141,7 +152,7 @@ function initialize() {
             logger.info(`[RPC] Connecté à Discord avec le client ${rpcClient?.user?.username}`);
             isRpcReady = true;
 
-            notifier.notify({
+            customNotifier.notify({
                 title: 'Apple Music RPC',
                 message: 'Connecté avec succès à Discord',
                 sound: false,

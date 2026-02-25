@@ -5,6 +5,7 @@ import * as readline from 'readline';
 import { logger } from './utils/logger';
 import { MediaPayloadSchema, MediaPayload } from './schemas/media.schema';
 import { resolveTrackInfo } from './services/itunes.service';
+import notifier from 'node-notifier';
 
 const CLIENT_ID = '1114806909590048798';
 const rpcClient = new Client({ transport: 'ipc' });
@@ -118,17 +119,33 @@ function startNativeExtractor() {
 }
 
 function initialize() {
-    logger.info('[System] Initialisation Core v2.0 (Sécurisé)');
+    logger.info('[System] Initialisation Core v2.6 (Résilience & Toasts)');
+
+    // Démarrage immédiat de l'extracteur natif sans attendre Discord
+    startNativeExtractor();
 
     rpcClient.on('ready', () => {
         logger.info(`[RPC] Connecté à Discord avec le client ${rpcClient.user?.username}`);
         isRpcReady = true;
-        startNativeExtractor();
+
+        notifier.notify({
+            title: 'Apple Music RPC',
+            message: 'Connecté avec succès à Discord',
+            sound: false,
+            wait: false
+        });
+    });
+
+    rpcClient.on('disconnected', () => {
+        logger.warn('[RPC] Déconnecté de Discord. Tentative de reconnexion dans 10s...');
+        isRpcReady = false;
+        setTimeout(connectToDiscord, 10000);
     });
 
     const connectToDiscord = () => {
+        if (isRpcReady) return;
         rpcClient.login({ clientId: CLIENT_ID }).catch((err: any) => {
-            logger.error(`[RPC] Echec de connexion Discord: ${err.message}. Nouvelle tentative dans 10s...`);
+            logger.debug(`[RPC] En attente de Discord (Fermé ou injoignable). Résilience activée...`);
             setTimeout(connectToDiscord, 10000);
         });
     };
@@ -137,8 +154,14 @@ function initialize() {
 
     process.on('SIGINT', cleanup);
     process.on('SIGTERM', cleanup);
-    process.on('uncaughtException', (err) => {
-        logger.fatal({ err }, '[System] Exception Crash');
+    process.on('uncaughtException', (err: any) => {
+        // Fallback ultime : On empêche l'application de crasher si le socket IPC Windows lâche au démarrage (Discord non allumé)
+        if (err.message?.includes('connect') || err.message?.includes('RPC') || err.code === 'ENOENT' || err.code === 'ECONNRESET' || err.code === 'EPIPE') {
+            logger.debug(`[System] Erreur IPC (RPC) absorbée silencieusement : ${err.message || err.code}`);
+            return;
+        }
+
+        logger.fatal({ err }, '[System] Exception fatale non interceptée');
         cleanup();
         process.exit(1);
     });

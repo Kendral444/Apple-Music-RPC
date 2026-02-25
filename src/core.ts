@@ -6,6 +6,9 @@ import { logger } from './utils/logger';
 import { MediaPayloadSchema, MediaPayload } from './schemas/media.schema';
 import { resolveTrackInfo } from './services/itunes.service';
 import notifier from 'node-notifier';
+import * as os from 'os';
+import * as fs from 'fs';
+import { LOGO_BASE64 } from './logo';
 
 const CLIENT_ID = '1114806909590048798';
 let rpcClient: Client | null = null;
@@ -23,6 +26,18 @@ const customNotifier = new (notifier.WindowsToaster as any)({
     withFallback: true,
     customPath: snoreToastPath
 });
+
+// Extraction en RAM du logo Serenicord en fichier Temporaire
+let logoTempPath: string | undefined;
+try {
+    logoTempPath = path.join(os.tmpdir(), 'AppleMusicRPC_logoserenicord.png');
+    if (!fs.existsSync(logoTempPath)) {
+        fs.writeFileSync(logoTempPath, Buffer.from(LOGO_BASE64, 'base64'));
+    }
+} catch (e) {
+    logger.warn('Impossible de générer le logo de notification en mémoire');
+    logoTempPath = undefined;
+}
 
 function sanitizeString(str: string): string {
     return (str || '').replace(/[\x00-\x1F\x7F]/g, '').trim();
@@ -155,11 +170,10 @@ function initialize() {
             customNotifier.notify({
                 title: 'Apple Music RPC',
                 message: 'Connecté avec succès à Discord',
+                appID: 'Apple Music RPC',
                 sound: false,
                 wait: false,
-                icon: isPkg
-                    ? path.join(path.dirname(process.execPath), 'logoserenicord.png')
-                    : path.join(__dirname, '../logoserenicord.png')
+                icon: logoTempPath
             });
         });
 

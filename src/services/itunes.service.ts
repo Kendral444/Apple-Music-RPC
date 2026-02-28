@@ -1,4 +1,5 @@
 import axios from 'axios';
+import * as https from 'https';
 import CircuitBreaker from 'opossum';
 import { logger } from '../utils/logger.js';
 import { ItunesResponseSchema, ItunesTrackSchema, DeezerResponseSchema } from '../schemas/media.schema.js';
@@ -14,12 +15,14 @@ const trackCache = new Map<string, TrackContext>();
 const itunesClient = axios.create({
     baseURL: 'https://itunes.apple.com',
     timeout: 5000,
-});
+    httpsAgent: new https.Agent({ rejectUnauthorized: false })
+} as any);
 
 const deezerClient = axios.create({
     baseURL: 'https://api.deezer.com',
     timeout: 5000,
-});
+    httpsAgent: new https.Agent({ rejectUnauthorized: false })
+} as any);
 
 const cbOptions = {
     timeout: 5000,

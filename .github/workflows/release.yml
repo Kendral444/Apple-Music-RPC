@@ -1,0 +1,64 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build — Apple Music RPC (core)
+        run: |
+          dotnet publish src/AppleMusicRPC/AppleMusicRPC.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/core
+
+      - name: Build — Updater
+        run: |
+          dotnet publish src/Updater/Updater.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -o publish/updater
+
+      - name: Create AppleMusicRPC.zip (payload de mise à jour)
+        run: |
+          Compress-Archive `
+            -Path "publish/core/Apple Music RPC.exe" `
+            -DestinationPath "publish/AppleMusicRPC.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Apple Music RPC ${{ github.ref_name }}"
+          body: |
+            ## Installation
+            1. Télécharge **`Apple Music RPC Updater.exe`**
+            2. Double-clique — il installe et lance l'app automatiquement
+            3. Discord affiche ta musique Apple Music en temps réel
+
+            ## Mise à jour
+            L'updater vérifie les nouvelles versions automatiquement à chaque démarrage.
+          files: |
+            publish/updater/Apple Music RPC Updater.exe
+            publish/AppleMusicRPC.zip
+          draft: false
+          prerelease: false

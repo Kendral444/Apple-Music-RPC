@@ -1,18 +1,22 @@
-node_modules/
-dist/
+# Build outputs
+bin/
+obj/
+publish/
 *.exe
-core-bin.exe
-src/MediaExtractor/bin/
-src/MediaExtractor/obj/
-.env
-logs/
-*.log
-npm-debug.log*
-.DS_Store
-*.orig
-src/bin/
-src/obj/
 *.zip
-PROJECT_HISTORY.md
-src/AppleMusicRPC_Updater/bin/
-src/AppleMusicRPC_Updater/obj/
+
+# Config utilisateur (contient des préférences locales)
+config.json
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vs/
+.vscode/
+*.user
+
+# OS
+.DS_Store
+Thumbs.db

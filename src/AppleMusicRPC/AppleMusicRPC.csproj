@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Apple Music RPC</AssemblyName>
+    <RootNamespace>AppleMusicRPC</RootNamespace>
+    <ApplicationIcon>..\..\appicon.ico</ApplicationIcon>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\appicon.ico">
+      <LogicalName>appicon.ico</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

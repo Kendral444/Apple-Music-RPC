@@ -23,13 +23,31 @@ internal sealed class RpcArgs
 
 internal sealed class RpcActivity
 {
-    [JsonPropertyName("details")]    public string?         Details    { get; init; }
-    [JsonPropertyName("state")]      public string?         State      { get; init; }
-    [JsonPropertyName("assets")]     public RpcAssets?      Assets     { get; init; }
-    [JsonPropertyName("timestamps")] public RpcTimestamps?  Timestamps { get; init; }
-    [JsonPropertyName("buttons")]    public RpcButton[]?    Buttons    { get; init; }
-    [JsonPropertyName("type")]       public int             Type       { get; init; }
-    [JsonPropertyName("instance")]   public bool            Instance   { get; init; }
+    [JsonPropertyName("details")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Details { get; init; }
+
+    [JsonPropertyName("state")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? State { get; init; }
+
+    [JsonPropertyName("assets")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RpcAssets? Assets { get; init; }
+
+    [JsonPropertyName("timestamps")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RpcTimestamps? Timestamps { get; init; }
+
+    [JsonPropertyName("buttons")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RpcButton[]? Buttons { get; init; }
+
+    [JsonPropertyName("type")]
+    public int Type { get; init; }
+
+    [JsonPropertyName("instance")]
+    public bool Instance { get; init; }
 }
 
 internal sealed class RpcAssets
@@ -93,6 +111,7 @@ public class DiscordIpcClient : IDisposable
 
     private async Task ConnectAsync(CancellationToken ct)
     {
+        Log.Info("DiscordIPC: tentative connexion...");
         for (int i = 0; i < 10; i++)
         {
             try
@@ -101,6 +120,7 @@ public class DiscordIpcClient : IDisposable
                     PipeDirection.InOut, PipeOptions.Asynchronous);
                 await pipe.ConnectAsync(500, ct);
                 _pipe = pipe;
+                Log.Info($"DiscordIPC: connecté sur discord-ipc-{i}");
                 break;
             }
             catch { /* essai pipe suivant */ }
@@ -109,6 +129,7 @@ public class DiscordIpcClient : IDisposable
         if (_pipe is null) throw new InvalidOperationException("Discord introuvable sur les pipes 0-9.");
 
         await SendRawAsync(0, $"{{\"v\":1,\"client_id\":\"{ClientId}\"}}");
+        Log.Info("DiscordIPC: handshake envoyé");
     }
 
     private async Task ReadLoopAsync(CancellationToken ct)
@@ -137,13 +158,33 @@ public class DiscordIpcClient : IDisposable
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("evt", out var evt) && evt.GetString() == "READY")
+            if (doc.RootElement.TryGetProperty("evt", out var evt))
             {
-                _ready = true;
-                OnReady?.Invoke();
+                var evtStr = evt.GetString();
+                if (evtStr == "READY")
+                {
+                    _ready = true;
+                    Log.Info("DiscordIPC: READY ✓");
+                    OnReady?.Invoke();
+                }
+                else if (evtStr == "ERROR")
+                {
+                    // Logger toute la réponse pour diagnostiquer
+                    Log.Error($"DiscordIPC: ERROR reçu → {json}");
+                }
+                else
+                {
+                    Log.Info($"DiscordIPC: frame evt={evtStr ?? "null"}");
+                }
+            }
+            else
+            {
+                // Réponse sans evt (ex: réponse à SET_ACTIVITY)
+                var cmd = doc.RootElement.TryGetProperty("cmd", out var c) ? c.GetString() : "?";
+                Log.Info($"DiscordIPC: réponse cmd={cmd} → {json[..Math.Min(300, json.Length)]}");
             }
         }
-        catch { }
+        catch (Exception ex) { Log.Error("DiscordIPC HandleFrame", ex); }
     }
 
     private async Task ReadExactlyAsync(byte[] buf, CancellationToken ct)
@@ -222,6 +263,7 @@ public class DiscordIpcClient : IDisposable
         };
 
         var json = JsonSerializer.Serialize(payload, RpcJsonCtx.Default.RpcPayload);
+        Log.Info($"DiscordIPC: SendPayload → {json[..Math.Min(200, json.Length)]}");
         return SendRawAsync(1, json);
     }
 

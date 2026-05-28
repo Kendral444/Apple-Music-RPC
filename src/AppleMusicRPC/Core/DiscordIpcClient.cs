@@ -6,6 +6,55 @@ using AppleMusicRPC.Models;
 
 namespace AppleMusicRPC.Core;
 
+// ── DTOs Discord (sérialisation source-generated, trim-safe) ──────────────────
+
+internal sealed class RpcPayload
+{
+    [JsonPropertyName("cmd")]   public string    Cmd   { get; init; } = "";
+    [JsonPropertyName("args")]  public RpcArgs   Args  { get; init; } = new();
+    [JsonPropertyName("nonce")] public string    Nonce { get; init; } = "";
+}
+
+internal sealed class RpcArgs
+{
+    [JsonPropertyName("pid")]      public int             Pid      { get; init; }
+    [JsonPropertyName("activity")] public RpcActivity?   Activity { get; init; }
+}
+
+internal sealed class RpcActivity
+{
+    [JsonPropertyName("details")]    public string?         Details    { get; init; }
+    [JsonPropertyName("state")]      public string?         State      { get; init; }
+    [JsonPropertyName("assets")]     public RpcAssets?      Assets     { get; init; }
+    [JsonPropertyName("timestamps")] public RpcTimestamps?  Timestamps { get; init; }
+    [JsonPropertyName("buttons")]    public RpcButton[]?    Buttons    { get; init; }
+    [JsonPropertyName("type")]       public int             Type       { get; init; }
+    [JsonPropertyName("instance")]   public bool            Instance   { get; init; }
+}
+
+internal sealed class RpcAssets
+{
+    [JsonPropertyName("large_image")] public string? LargeImage { get; init; }
+    [JsonPropertyName("large_text")]  public string? LargeText  { get; init; }
+}
+
+internal sealed class RpcTimestamps
+{
+    [JsonPropertyName("start")] public long Start { get; init; }
+    [JsonPropertyName("end")]   public long End   { get; init; }
+}
+
+internal sealed class RpcButton
+{
+    [JsonPropertyName("label")] public string Label { get; init; } = "";
+    [JsonPropertyName("url")]   public string Url   { get; init; } = "";
+}
+
+[JsonSerializable(typeof(RpcPayload))]
+internal partial class RpcJsonCtx : JsonSerializerContext { }
+
+// ── Client IPC ────────────────────────────────────────────────────────────────
+
 public class DiscordIpcClient : IDisposable
 {
     private const string ClientId = "1114806909590048798";
@@ -13,7 +62,6 @@ public class DiscordIpcClient : IDisposable
     private NamedPipeClientStream? _pipe;
     private bool _ready;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
-    private CancellationTokenSource _cts = new();
 
     public bool IsReady => _ready;
     public event Action? OnReady;
@@ -29,7 +77,7 @@ public class DiscordIpcClient : IDisposable
                 await ReadLoopAsync(ct);
             }
             catch (OperationCanceledException) { break; }
-            catch { /* Discord fermé */ }
+            catch { /* Discord fermé / injoignable */ }
             finally
             {
                 _ready = false;
@@ -39,7 +87,7 @@ public class DiscordIpcClient : IDisposable
             }
 
             if (!ct.IsCancellationRequested)
-                await Task.Delay(10_000, ct);
+                await Task.Delay(10_000, ct).ConfigureAwait(false);
         }
     }
 
@@ -49,18 +97,18 @@ public class DiscordIpcClient : IDisposable
         {
             try
             {
-                var pipe = new NamedPipeClientStream(".", $"discord-ipc-{i}", PipeDirection.InOut, PipeOptions.Asynchronous);
+                var pipe = new NamedPipeClientStream(".", $"discord-ipc-{i}",
+                    PipeDirection.InOut, PipeOptions.Asynchronous);
                 await pipe.ConnectAsync(500, ct);
                 _pipe = pipe;
                 break;
             }
-            catch { /* essai suivant */ }
+            catch { /* essai pipe suivant */ }
         }
 
-        if (_pipe is null) throw new Exception("Discord introuvable");
+        if (_pipe is null) throw new InvalidOperationException("Discord introuvable sur les pipes 0-9.");
 
-        // Handshake
-        await SendFrameAsync(0, $"{{\"v\":1,\"client_id\":\"{ClientId}\"}}");
+        await SendRawAsync(0, $"{{\"v\":1,\"client_id\":\"{ClientId}\"}}");
     }
 
     private async Task ReadLoopAsync(CancellationToken ct)
@@ -69,14 +117,18 @@ public class DiscordIpcClient : IDisposable
         while (_pipe?.IsConnected == true && !ct.IsCancellationRequested)
         {
             await ReadExactlyAsync(header, ct);
+
             int opcode = BitConverter.ToInt32(header, 0);
             int length  = BitConverter.ToInt32(header, 4);
 
-            var payload = new byte[length];
-            await ReadExactlyAsync(payload, ct);
+            var body = new byte[Math.Max(0, length)];
+            if (length > 0) await ReadExactlyAsync(body, ct);
 
-            if (opcode == 1) HandleFrame(Encoding.UTF8.GetString(payload));
-            else if (opcode == 2) break; // CLOSE
+            switch (opcode)
+            {
+                case 1: HandleFrame(Encoding.UTF8.GetString(body)); break;
+                case 2: return; // CLOSE envoyé par Discord
+            }
         }
     }
 
@@ -85,8 +137,7 @@ public class DiscordIpcClient : IDisposable
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("evt", out var evt)
-                && evt.GetString() == "READY")
+            if (doc.RootElement.TryGetProperty("evt", out var evt) && evt.GetString() == "READY")
             {
                 _ready = true;
                 OnReady?.Invoke();
@@ -95,99 +146,108 @@ public class DiscordIpcClient : IDisposable
         catch { }
     }
 
-    private async Task ReadExactlyAsync(byte[] buffer, CancellationToken ct)
+    private async Task ReadExactlyAsync(byte[] buf, CancellationToken ct)
     {
         int read = 0;
-        while (read < buffer.Length)
+        while (read < buf.Length)
         {
-            int n = await _pipe!.ReadAsync(buffer.AsMemory(read), ct);
-            if (n == 0) throw new EndOfStreamException("Pipe fermé");
+            int n = await _pipe!.ReadAsync(buf.AsMemory(read), ct);
+            if (n == 0) throw new EndOfStreamException("Pipe Discord fermé.");
             read += n;
         }
     }
 
-    public async Task SetActivityAsync(MediaInfo info, string? artUrl, string trackUrl, AppConfig config)
+    // ── API publique ──────────────────────────────────────────────────────────
+
+    public Task SetActivityAsync(MediaInfo info, string? artUrl, string trackUrl, AppConfig config)
     {
-        if (!_ready) return;
+        if (!_ready || _pipe is null) return Task.CompletedTask;
 
-        var activity = BuildActivity(info, artUrl, trackUrl, config);
-        var payload = new
-        {
-            cmd = "SET_ACTIVITY",
-            args = new { pid = Environment.ProcessId, activity },
-            nonce = Guid.NewGuid().ToString("N")
-        };
-        await SendFrameAsync(1, JsonSerializer.Serialize(payload, JsonCtx.Default.Object));
-    }
+        var cfg     = config.Display;
+        var details = Sanitize(info.Title);
+        var state   = cfg.ShowArtist ? Sanitize(info.Artist) : null;
 
-    public async Task ClearActivityAsync()
-    {
-        if (!_ready) return;
-        var payload = new
-        {
-            cmd = "SET_ACTIVITY",
-            args = new { pid = Environment.ProcessId, activity = (object?)null },
-            nonce = Guid.NewGuid().ToString("N")
-        };
-        await SendFrameAsync(1, JsonSerializer.Serialize(payload, JsonCtx.Default.Object));
-    }
-
-    private static object BuildActivity(MediaInfo info, string? artUrl, string trackUrl, AppConfig cfg)
-    {
-        var display = cfg.Display;
-
-        var details = SanitizeForDiscord(info.Title);
-        var state   = display.ShowArtist ? SanitizeForDiscord(info.Artist) : null;
-        var largeText = display.ShowAlbum && !string.IsNullOrWhiteSpace(info.Album)
-            ? SanitizeForDiscord(info.Album)
-            : "Apple Music";
-
-        object? timestamps = null;
-        if (display.ShowTimestamps && info.Status == PlaybackStatus.Playing
+        RpcTimestamps? timestamps = null;
+        if (cfg.ShowTimestamps && info.Status == PlaybackStatus.Playing
             && info.StartTimestampMs > 0 && info.EndTimestampMs > info.StartTimestampMs)
         {
-            timestamps = new { start = info.StartTimestampMs, end = info.EndTimestampMs };
+            timestamps = new RpcTimestamps
+            {
+                Start = info.StartTimestampMs,
+                End   = info.EndTimestampMs
+            };
         }
 
-        object? assets = display.ShowAlbumArt
-            ? new { large_image = artUrl ?? "apple_music_logo", large_text = largeText }
-            : new { large_image = "apple_music_logo", large_text = "Apple Music" };
+        var largeText = cfg.ShowAlbum && !string.IsNullOrWhiteSpace(info.Album)
+            ? Sanitize(info.Album)
+            : "Apple Music";
 
-        object[]? buttons = display.ShowButton && !string.IsNullOrWhiteSpace(display.ButtonLabel)
-            ? [new { label = display.ButtonLabel, url = trackUrl }]
+        var assets = new RpcAssets
+        {
+            LargeImage = cfg.ShowAlbumArt ? (artUrl ?? "apple_music_logo") : "apple_music_logo",
+            LargeText  = largeText
+        };
+
+        RpcButton[]? buttons = cfg.ShowButton && !string.IsNullOrWhiteSpace(cfg.ButtonLabel)
+            ? [new RpcButton { Label = cfg.ButtonLabel, Url = trackUrl }]
             : null;
 
-        return new { details, state, assets, timestamps, buttons, type = 2, instance = false };
+        var activity = new RpcActivity
+        {
+            Details    = details,
+            State      = state,
+            Assets     = assets,
+            Timestamps = timestamps,
+            Buttons    = buttons,
+            Type       = 2,       // Listening
+            Instance   = false
+        };
+
+        return SendPayloadAsync(activity);
     }
 
-    private static string SanitizeForDiscord(string s) =>
-        (s ?? "").Replace("\x00", "").Trim() is { Length: > 0 } clean ? clean : "​";
-
-    private async Task SendFrameAsync(int opcode, string json)
+    public Task ClearActivityAsync()
     {
-        var payload = Encoding.UTF8.GetBytes(json);
-        var header  = new byte[8];
+        if (!_ready || _pipe is null) return Task.CompletedTask;
+        return SendPayloadAsync(null);
+    }
+
+    private Task SendPayloadAsync(RpcActivity? activity)
+    {
+        var payload = new RpcPayload
+        {
+            Cmd   = "SET_ACTIVITY",
+            Args  = new RpcArgs { Pid = Environment.ProcessId, Activity = activity },
+            Nonce = Guid.NewGuid().ToString("N")
+        };
+
+        var json = JsonSerializer.Serialize(payload, RpcJsonCtx.Default.RpcPayload);
+        return SendRawAsync(1, json);
+    }
+
+    private async Task SendRawAsync(int opcode, string json)
+    {
+        var body   = Encoding.UTF8.GetBytes(json);
+        var header = new byte[8];
         BitConverter.TryWriteBytes(header.AsSpan(0), opcode);
-        BitConverter.TryWriteBytes(header.AsSpan(4), payload.Length);
+        BitConverter.TryWriteBytes(header.AsSpan(4), body.Length);
 
         await _writeLock.WaitAsync();
         try
         {
             await _pipe!.WriteAsync(header);
-            await _pipe!.WriteAsync(payload);
+            await _pipe!.WriteAsync(body);
             await _pipe!.FlushAsync();
         }
         finally { _writeLock.Release(); }
     }
 
+    private static string Sanitize(string? s) =>
+        (s ?? "").Replace("\x00", "").Trim() is { Length: > 0 } v ? v : "​";
+
     public void Dispose()
     {
-        _cts.Cancel();
         _pipe?.Dispose();
         _writeLock.Dispose();
     }
 }
-
-// Contexte de sérialisation source-generated pour éviter la réflexion à l'exécution
-[JsonSerializable(typeof(object))]
-internal partial class JsonCtx : JsonSerializerContext { }

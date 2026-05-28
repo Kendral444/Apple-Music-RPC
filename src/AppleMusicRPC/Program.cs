@@ -55,6 +55,24 @@ static class Program
                 UseShellExecute = true
             });
 
+        tray.UninstallRequested += () =>
+        {
+            var updaterPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "AppleMusicRPC", "Apple Music RPC Updater.exe");
+
+            if (File.Exists(updaterPath))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName        = updaterPath,
+                    Arguments       = "--uninstall",
+                    UseShellExecute = true
+                });
+            }
+            cts.Cancel();
+        };
+
         tray.QuitRequested += () => cts.Cancel();
 
         _ = discord.RunAsync(cts.Token);

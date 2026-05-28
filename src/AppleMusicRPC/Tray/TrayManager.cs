@@ -34,10 +34,11 @@ public sealed class TrayManager : IDisposable
     private const int CS_VREDRAW      = 0x0001;
 
     // Menu IDs
-    private const int ID_TOGGLE  = 1001;
-    private const int ID_CONFIG  = 1002;
-    private const int ID_UPDATE  = 1003;
-    private const int ID_QUIT    = 1004;
+    private const int ID_TOGGLE    = 1001;
+    private const int ID_CONFIG    = 1002;
+    private const int ID_UPDATE    = 1003;
+    private const int ID_UNINSTALL = 1004;
+    private const int ID_QUIT      = 1005;
 
     // ── Win32 structures ─────────────────────────────────────────────────────
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -159,6 +160,7 @@ public sealed class TrayManager : IDisposable
 
     public event Action? ToggleRpcRequested;
     public event Action? CheckUpdateRequested;
+    public event Action? UninstallRequested;
     public event Action? QuitRequested;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -243,6 +245,9 @@ public sealed class TrayManager : IDisposable
                 case ID_UPDATE:
                     CheckUpdateRequested?.Invoke();
                     break;
+                case ID_UNINSTALL:
+                    UninstallRequested?.Invoke();
+                    break;
                 case ID_QUIT:
                     QuitRequested?.Invoke();
                     DestroyWindow(hWnd);
@@ -312,10 +317,11 @@ public sealed class TrayManager : IDisposable
         AppendMenu(hMenu, MF_STRING, ID_TOGGLE,
             _rpcEnabled ? "✓  RPC activé" : "    RPC désactivé");
         AppendMenu(hMenu, MF_SEPARATOR, 0, null);
-        AppendMenu(hMenu, MF_STRING, ID_CONFIG,  "Ouvrir la configuration");
-        AppendMenu(hMenu, MF_STRING, ID_UPDATE,  "Vérifier les mises à jour");
+        AppendMenu(hMenu, MF_STRING, ID_CONFIG,    "Ouvrir la configuration");
+        AppendMenu(hMenu, MF_STRING, ID_UPDATE,    "Vérifier les mises à jour");
         AppendMenu(hMenu, MF_SEPARATOR, 0, null);
-        AppendMenu(hMenu, MF_STRING, ID_QUIT,    "Quitter");
+        AppendMenu(hMenu, MF_STRING, ID_UNINSTALL, "Désinstaller");
+        AppendMenu(hMenu, MF_STRING, ID_QUIT,      "Quitter");
 
         var pt = new POINT();
         GetCursorPos(ref pt);

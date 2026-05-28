@@ -9,20 +9,31 @@ namespace Updater;
 
 static class Program
 {
-    private const string RepoOwner   = "Kendral444";
-    private const string RepoName    = "apple-music-rpc";
-    private const string AppExeName  = "Apple Music RPC.exe";
-    private const string SelfKeyName = "AppleMusicRPC";
+    private const string RepoOwner    = "Kendral444";
+    private const string RepoName     = "apple-music-rpc";
+    private const string AppExeName   = "Apple Music RPC.exe";
+    private const string StartupKey   = "AppleMusicRPC";
+    private const string UninstallReg = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\AppleMusicRPC";
+    private const string StartupReg   = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
 
-    private static readonly string InstallDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "AppleMusicRPC"
-    );
+    private static readonly string InstallDir  = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AppleMusicRPC");
     private static readonly string VersionFile = Path.Combine(InstallDir, "version.txt");
-    private static readonly string MainExePath  = Path.Combine(InstallDir, AppExeName);
+    private static readonly string MainExePath = Path.Combine(InstallDir, AppExeName);
 
-    static async Task Main()
+    static async Task Main(string[] args)
     {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        // ── Mode désinstallation ───────────────────────────────────────────────
+        if (args.Contains("--uninstall"))
+        {
+            bool quiet = args.Contains("--quiet");
+            Uninstall(quiet);
+            return;
+        }
+
+        // ── Mode normal : mise à jour + lancement ──────────────────────────────
         Directory.CreateDirectory(InstallDir);
         RegisterStartup();
 
@@ -53,16 +64,88 @@ static class Program
         LaunchApp();
     }
 
+    // ── Désinstallation ───────────────────────────────────────────────────────
+    private static void Uninstall(bool quiet)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        Console.Title = "Désinstallation — Apple Music RPC";
+        Console.WriteLine("[Uninstall] Désinstallation de Apple Music RPC...");
+
+        // 1. Tuer les processus en cours
+        KillAllProcesses();
+        Console.WriteLine("[Uninstall] Processus arrêtés.");
+
+        // 2. Supprimer l'entrée de démarrage Windows
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(StartupReg, writable: true);
+            key?.DeleteValue(StartupKey, throwOnMissingValue: false);
+            Console.WriteLine("[Uninstall] Démarrage automatique supprimé.");
+        }
+        catch { }
+
+        // 3. Supprimer l'entrée Ajout/Suppression de programmes
+        try
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(UninstallReg, throwOnMissingSubKey: false);
+            Console.WriteLine("[Uninstall] Entrée Programmes supprimée.");
+        }
+        catch { }
+
+        // 4. Supprimer le raccourci menu Démarrer
+        try
+        {
+            var shortcutDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                "Programs", "Apple Music RPC");
+            if (Directory.Exists(shortcutDir))
+            {
+                Directory.Delete(shortcutDir, recursive: true);
+                Console.WriteLine("[Uninstall] Raccourci menu Démarrer supprimé.");
+            }
+        }
+        catch { }
+
+        // 5. Planifier la suppression du répertoire d'installation + auto-suppression
+        //    (on ne peut pas supprimer le répertoire depuis l'intérieur de celui-ci)
+        var selfExe   = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+        var scriptPath = Path.Combine(Path.GetTempPath(), "AppleMusicRPC_uninstall.cmd");
+
+        File.WriteAllText(scriptPath, $"""
+            @echo off
+            ping 127.0.0.1 -n 3 > nul
+            rmdir /s /q "{InstallDir}"
+            del /f /q "{selfExe}"
+            del /f /q "%~f0"
+            """);
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName        = "cmd.exe",
+            Arguments       = $"/c \"{scriptPath}\"",
+            UseShellExecute = true,
+            WindowStyle     = ProcessWindowStyle.Hidden
+        });
+
+        Console.WriteLine("[Uninstall] Désinstallation complète. À bientôt !");
+
+        if (!quiet)
+        {
+            Console.WriteLine("\nAppuyez sur une touche pour fermer...");
+            Console.ReadKey(intercept: true);
+        }
+    }
+
+    // ── Mise à jour ───────────────────────────────────────────────────────────
     private static void RegisterStartup()
     {
         try
         {
-            string self = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+            var self = Process.GetCurrentProcess().MainModule?.FileName ?? "";
             if (string.IsNullOrEmpty(self)) return;
-
-            using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", writable: true);
-            if (key?.GetValue(SelfKeyName) as string != $"\"{self}\"")
-                key?.SetValue(SelfKeyName, $"\"{self}\"");
+            using var key = Registry.CurrentUser.OpenSubKey(StartupReg, writable: true);
+            if (key?.GetValue(StartupKey) as string != $"\"{self}\"")
+                key?.SetValue(StartupKey, $"\"{self}\"");
         }
         catch { }
     }
@@ -71,9 +154,8 @@ static class Program
     {
         using var http = new HttpClient();
         http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("AppleMusicRPC", "1.0"));
-
-        var url = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest";
-        var json = await http.GetStringAsync(url);
+        var json = await http.GetStringAsync(
+            $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest");
         return JsonSerializer.Deserialize(json, UpdaterJsonCtx.Default.GitHubRelease);
     }
 
@@ -82,7 +164,7 @@ static class Program
         var zipAsset = release.Assets?.FirstOrDefault(a =>
             a.Name?.Equals("AppleMusicRPC.zip", StringComparison.OrdinalIgnoreCase) == true);
 
-        if (zipAsset is null)
+        if (zipAsset?.DownloadUrl is null)
         {
             Console.WriteLine("[Updater] Aucun asset .zip trouvé.");
             return;
@@ -126,12 +208,15 @@ static class Program
     private static void KillRunningApp()
     {
         foreach (var name in new[] { "Apple Music RPC", "AppleMusicRPC" })
-        {
             foreach (var proc in Process.GetProcessesByName(name))
-            {
                 try { proc.Kill(); proc.WaitForExit(3000); } catch { }
-            }
-        }
+    }
+
+    private static void KillAllProcesses()
+    {
+        foreach (var name in new[] { "Apple Music RPC", "AppleMusicRPC", "Apple Music RPC Updater" })
+            foreach (var proc in Process.GetProcessesByName(name))
+                try { if (proc.Id != Environment.ProcessId) { proc.Kill(); proc.WaitForExit(3000); } } catch { }
     }
 
     private static void LaunchApp()
@@ -141,23 +226,21 @@ static class Program
             Console.WriteLine($"[Updater] Exécutable introuvable : {MainExePath}");
             return;
         }
-
         Console.WriteLine("[Updater] Lancement de l'application...");
         Process.Start(new ProcessStartInfo
         {
-            FileName         = MainExePath,
+            FileName        = MainExePath,
             WorkingDirectory = InstallDir,
-            UseShellExecute  = true,
-            WindowStyle      = ProcessWindowStyle.Hidden
+            UseShellExecute = true,
+            WindowStyle     = ProcessWindowStyle.Hidden
         });
     }
 }
 
-// --- Modèles GitHub ---
 public class GitHubRelease
 {
-    [JsonPropertyName("tag_name")]  public string?        TagName { get; set; }
-    [JsonPropertyName("assets")]    public GitHubAsset[]? Assets  { get; set; }
+    [JsonPropertyName("tag_name")] public string?        TagName { get; set; }
+    [JsonPropertyName("assets")]   public GitHubAsset[]? Assets  { get; set; }
 }
 
 public class GitHubAsset

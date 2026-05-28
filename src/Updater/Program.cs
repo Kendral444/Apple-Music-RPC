@@ -80,7 +80,7 @@ static class Program
     private static async Task ApplyUpdateAsync(GitHubRelease release)
     {
         var zipAsset = release.Assets?.FirstOrDefault(a =>
-            a.Name.Equals("AppleMusicRPC.zip", StringComparison.OrdinalIgnoreCase));
+            a.Name?.Equals("AppleMusicRPC.zip", StringComparison.OrdinalIgnoreCase) == true);
 
         if (zipAsset is null)
         {

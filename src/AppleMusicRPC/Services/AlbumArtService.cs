@@ -16,7 +16,7 @@ public class AlbumArtService
     {
         var mainArtist = ExtractMainArtist(artist);
         var cleanTitle = SanitizeSearchTerm(title);
-        var cacheKey = $"{mainArtist}|{cleanTitle}";
+        var cacheKey   = $"{mainArtist}|{cleanTitle}";
 
         lock (_cacheLock)
         {
@@ -45,20 +45,20 @@ public class AlbumArtService
     {
         try
         {
-            var query = Uri.EscapeDataString($"{artist} {title}");
-            var url = $"https://itunes.apple.com/search?term={query}&media=music&entity=song&limit=5&country=FR";
+            var query    = Uri.EscapeDataString($"{artist} {title}");
+            var url      = $"https://itunes.apple.com/search?term={query}&media=music&entity=song&limit=5&country=FR";
+            var response = await _http.GetFromJsonAsync(url, AlbumArtJsonCtx.Default.ItunesResponse);
 
-            var response = await _http.GetFromJsonAsync<ItunesResponse>(url);
-            if (response?.Results is null || response.Results.Length == 0) return null;
+            if (response?.Results is not { Length: > 0 }) return null;
 
             var match = response.Results.FirstOrDefault(r =>
             {
                 var apiArtist = (r.ArtistName ?? "").ToLowerInvariant();
-                var apiTrack = (r.TrackName ?? "").ToLowerInvariant();
-                var qArtist = artist.ToLowerInvariant();
-                var qTrack = title.ToLowerInvariant();
+                var apiTrack  = (r.TrackName  ?? "").ToLowerInvariant();
+                var qArtist   = artist.ToLowerInvariant();
+                var qTrack    = title.ToLowerInvariant();
                 return (apiArtist.Contains(qArtist) || qArtist.Contains(apiArtist))
-                    && (apiTrack.Contains(qTrack) || qTrack.Contains(apiTrack));
+                    && (apiTrack.Contains(qTrack)    || qTrack.Contains(apiTrack));
             });
 
             if (match is null) return null;
@@ -73,10 +73,10 @@ public class AlbumArtService
     {
         try
         {
-            var query = Uri.EscapeDataString($"artist:\"{artist}\" track:\"{title}\"");
-            var url = $"https://api.deezer.com/search?q={query}&limit=1";
+            var query    = Uri.EscapeDataString($"artist:\"{artist}\" track:\"{title}\"");
+            var url      = $"https://api.deezer.com/search?q={query}&limit=1";
+            var response = await _http.GetFromJsonAsync(url, AlbumArtJsonCtx.Default.DeezerResponse);
 
-            var response = await _http.GetFromJsonAsync<DeezerResponse>(url);
             var item = response?.Data?.FirstOrDefault();
             if (item is null) return null;
 
@@ -87,37 +87,45 @@ public class AlbumArtService
 
     private static TrackResult BuildAvatarFallback(string artist, string title)
     {
-        var initials = $"{(title.Length > 0 ? title[0] : '?')}{(artist.Length > 0 ? artist[0] : '?')}".ToUpperInvariant();
+        var initials = $"{(title.Length  > 0 ? title[0]  : '?')}{(artist.Length > 0 ? artist[0] : '?')}".ToUpperInvariant();
         var art = $"https://ui-avatars.com/api/?name={Uri.EscapeDataString(initials)}&background=fc3c44&color=fff&size=512&bold=true";
         return new TrackResult(art, "https://music.apple.com/");
     }
 
     private static string SanitizeSearchTerm(string term) =>
-        Regex.Replace(term, @"\s*[-–]\s*Single$|\s*[-–]\s*EP$|\s*\(feat\..*?\)|\[.*?\]|\s*feat\.\s.*|\s*ft\.\s.*",
+        Regex.Replace(term,
+            @"\s*[-–]\s*(Single|EP)$|\s*\(feat\..*?\)|\[.*?\]|\s*feat\.\s.*|\s*ft\.\s.*",
             "", RegexOptions.IgnoreCase).Trim();
 
     private static string ExtractMainArtist(string artist) =>
         Regex.Split(artist, @"\s[—\-,&]\s|feat\.|ft\.")[0].Trim();
 
-    // --- iTunes models ---
-    private record ItunesResponse(
+    // ── iTunes models ──────────────────────────────────────────────────────────
+    internal record ItunesResponse(
         [property: JsonPropertyName("resultCount")] int ResultCount,
-        [property: JsonPropertyName("results")] ItunesTrack[]? Results);
+        [property: JsonPropertyName("results")]     ItunesTrack[]? Results);
 
-    private record ItunesTrack(
-        [property: JsonPropertyName("artistName")] string? ArtistName,
-        [property: JsonPropertyName("trackName")] string? TrackName,
-        [property: JsonPropertyName("artworkUrl100")] string? ArtworkUrl100,
+    internal record ItunesTrack(
+        [property: JsonPropertyName("artistName")]   string? ArtistName,
+        [property: JsonPropertyName("trackName")]    string? TrackName,
+        [property: JsonPropertyName("artworkUrl100")]string? ArtworkUrl100,
         [property: JsonPropertyName("trackViewUrl")] string? TrackViewUrl);
 
-    // --- Deezer models ---
-    private record DeezerResponse(
+    // ── Deezer models ──────────────────────────────────────────────────────────
+    internal record DeezerResponse(
         [property: JsonPropertyName("data")] DeezerTrack[]? Data);
 
-    private record DeezerTrack(
-        [property: JsonPropertyName("link")] string? Link,
+    internal record DeezerTrack(
+        [property: JsonPropertyName("link")]  string?      Link,
         [property: JsonPropertyName("album")] DeezerAlbum? Album);
 
-    private record DeezerAlbum(
+    internal record DeezerAlbum(
         [property: JsonPropertyName("cover_xl")] string? CoverXl);
 }
+
+// ── JSON source-generated context (trim-safe + rapide) ────────────────────────
+[JsonSerializable(typeof(AlbumArtService.ItunesResponse))]
+[JsonSerializable(typeof(AlbumArtService.ItunesTrack[]))]
+[JsonSerializable(typeof(AlbumArtService.DeezerResponse))]
+[JsonSerializable(typeof(AlbumArtService.DeezerTrack[]))]
+internal partial class AlbumArtJsonCtx : JsonSerializerContext { }

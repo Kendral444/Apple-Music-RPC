@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AppleMusicRPC.Models;
 
 namespace AppleMusicRPC.Services;
@@ -32,12 +33,7 @@ public class ConfigService : IDisposable
     public void Load()
     {
         Directory.CreateDirectory(AppDataDir);
-
-        if (!File.Exists(ConfigPath))
-        {
-            Save(new AppConfig());
-        }
-
+        if (!File.Exists(ConfigPath)) Save(new AppConfig());
         Reload();
         StartWatcher();
     }
@@ -46,8 +42,8 @@ public class ConfigService : IDisposable
     {
         try
         {
-            var json = File.ReadAllText(ConfigPath);
-            var loaded = JsonSerializer.Deserialize<AppConfig>(json, JsonOptions);
+            var json   = File.ReadAllText(ConfigPath);
+            var loaded = JsonSerializer.Deserialize(json, ConfigJsonCtx.Default.AppConfig);
             if (loaded is not null)
             {
                 lock (_lock) _config = loaded;
@@ -60,7 +56,7 @@ public class ConfigService : IDisposable
     public void Save(AppConfig config)
     {
         lock (_lock) _config = config;
-        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(config, JsonOptions));
+        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(config, ConfigJsonCtx.Default.AppConfig));
     }
 
     public void OpenInEditor()
@@ -79,13 +75,14 @@ public class ConfigService : IDisposable
             NotifyFilter = NotifyFilters.LastWrite,
             EnableRaisingEvents = true
         };
-
-        _watcher.Changed += (_, _) =>
-        {
-            Thread.Sleep(200); // laisse le fichier se fermer
-            Reload();
-        };
+        _watcher.Changed += (_, _) => { Thread.Sleep(200); Reload(); };
     }
 
     public void Dispose() => _watcher?.Dispose();
 }
+
+// ── JSON source-generated context ─────────────────────────────────────────────
+[JsonSerializable(typeof(AppConfig))]
+[JsonSerializable(typeof(DisplayConfig))]
+[JsonSerializable(typeof(BehaviorConfig))]
+internal partial class ConfigJsonCtx : JsonSerializerContext { }

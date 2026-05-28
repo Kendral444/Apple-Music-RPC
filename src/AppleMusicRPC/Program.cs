@@ -10,10 +10,6 @@ static class Program
     [STAThread]
     static void Main()
     {
-        Application.SetHighDpiMode(HighDpiMode.SystemAware);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-
         // Single-instance guard
         using var mutex = new Mutex(true, "AppleMusicRPC_SingleInstance", out bool isNew);
         if (!isNew) return;
@@ -30,7 +26,6 @@ static class Program
 
         config.Load();
 
-        // Discord RPC : reconnexion automatique en arrière-plan
         discord.OnReady += () =>
         {
             tray.ShowBalloon("Apple Music RPC", "Connecté à Discord ✓");
@@ -38,12 +33,10 @@ static class Program
                 _ = UpdateDiscordAsync(lastInfo);
         };
 
-        // SMTC → Discord
         smtc.MediaChanged += async (_, info) =>
         {
             lastInfo = info;
             tray.SetTrack(info);
-
             if (!rpcEnabled) return;
             await UpdateDiscordAsync(info);
         };
@@ -51,10 +44,8 @@ static class Program
         tray.ToggleRpcRequested += () =>
         {
             rpcEnabled = !rpcEnabled;
-            if (!rpcEnabled)
-                _ = discord.ClearActivityAsync();
-            else if (lastInfo is not null)
-                _ = UpdateDiscordAsync(lastInfo);
+            if (!rpcEnabled) _ = discord.ClearActivityAsync();
+            else if (lastInfo is not null) _ = UpdateDiscordAsync(lastInfo);
         };
 
         tray.CheckUpdateRequested += () =>
@@ -64,12 +55,13 @@ static class Program
                 UseShellExecute = true
             });
 
-        // Démarrage des boucles async
+        tray.QuitRequested += () => cts.Cancel();
+
         _ = discord.RunAsync(cts.Token);
         _ = smtc.StartAsync(cts.Token);
 
-        Application.ApplicationExit += (_, _) => cts.Cancel();
-        Application.Run(tray.Context);
+        // Boucle de messages Win32 (bloquant jusqu'au Quit)
+        tray.Run();
 
         async Task UpdateDiscordAsync(MediaInfo info)
         {
